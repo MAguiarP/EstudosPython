@@ -1,0 +1,34 @@
+numero_inteiro = 10
+numero_float = 3.14
+valor_booleano = True
+
+try:
+    inteiro_convertido = int(numero_inteiro)
+except ValueError:
+    print("Erro: valor inteiro inválido.")
+    inteiro_convertido = None
+
+try:
+    float_convertido = float(numero_float)
+except ValueError:
+    print("Erro: valor de ponto flutuante inválido.")
+    float_convertido = None
+
+if isinstance(valor_booleano, str):
+    if valor_booleano.lower() == 'true':
+        booleano_convertido = True
+    elif valor_booleano.lower() == 'false':
+        booleano_convertido = False
+    else:
+        print("Erro: valor booleano inválido. Use 'True' ou 'False'.")
+        booleano_convertido = None
+elif isinstance(valor_booleano, bool):
+    booleano_convertido = valor_booleano
+else:
+    print("Erro: valor booleano inválido. Use 'True' ou 'False'.")
+    booleano_convertido = None
+
+print("\nValores convertidos:")
+print(f"- Número inteiro: {inteiro_convertido} (tipo: {type(inteiro_convertido).__name__})")
+print(f"- Número de ponto flutuante: {float_convertido} (tipo: {type(float_convertido).__name__})")
+print(f"- Valor booleano: {booleano_convertido} (tipo: {type(booleano_convertido).__name__})")
