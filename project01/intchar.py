@@ -1,4 +1,14 @@
+def numechar(texto, numero):
+    print("Número", numero)
+    print("Texto", texto)
 
+numechar("Text sample", 30)
+
+
+
+
+
+my_breakpoint = 5
 
 
 # Passo 1: Definir a função imprimir_dados
