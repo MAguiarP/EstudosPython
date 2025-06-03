@@ -1,190 +1,222 @@
-import pygame
-from pygame.locals import *
-from OpenGL.GL import *
-from OpenGL.GLU import *
 import pyopencl as cl
 import numpy as np
+import glfw
+from OpenGL.GL import *
+from OpenGL.GLU import *
+from PIL import Image
 import time
+import math
 
 # Configurações
-WIDTH, HEIGHT = 3840, 2160  # 4K
-BLOCK_SIZE = 1.0
-NUM_BLOCKS = 20  # total de blocos
-NUM_PARTICLES = NUM_BLOCKS ** 3
+WIDTH, HEIGHT = 1200, 900
+SIM_DURATION = 20.0  # segundos
+IMPACT_TIME = 5.0    # tempo até impacto (queda)
+PARTICLES = 5000     # partículas totais (1 gota + respingo)
 
-EXPLOSION_ORIGIN = np.array([NUM_BLOCKS/2, NUM_BLOCKS/2, NUM_BLOCKS/2], dtype=np.float32)
-EXPLOSION_RADIUS = 15.0
-EXPLOSION_POWER = 50.0
+# Inicializa GLFW
+if not glfw.init():
+    raise Exception("Falha ao inicializar GLFW")
 
-# Inicializa pygame e OpenGL
-pygame.init()
-pygame.display.set_mode((WIDTH, HEIGHT), DOUBLEBUF | OPENGL)
-pygame.display.set_caption("Explosão 3D com OpenCL e OpenGL")
+window = glfw.create_window(WIDTH, HEIGHT, "Simulação Gota de Chuva 3D", None, None)
+if not window:
+    glfw.terminate()
+    raise Exception("Falha ao criar janela GLFW")
 
+glfw.make_context_current(window)
 glEnable(GL_DEPTH_TEST)
-glEnable(GL_TEXTURE_2D)
-glEnable(GL_LIGHTING)
-glEnable(GL_LIGHT0)
-glLightfv(GL_LIGHT0, GL_POSITION, (0, 100, 100, 1))
-glLightfv(GL_LIGHT0, GL_AMBIENT, (0.2, 0.2, 0.2, 1))
-glLightfv(GL_LIGHT0, GL_DIFFUSE, (1, 1, 1, 1))
-
-gluPerspective(45, WIDTH/HEIGHT, 0.1, 100.0)
-glTranslatef(-NUM_BLOCKS/2, -NUM_BLOCKS/2, -60)
-
-# Função para carregar textura simples
-def load_texture():
-    texture_surface = pygame.Surface((2,2))
-    texture_surface.fill((200, 200, 200))
-    pygame.draw.line(texture_surface, (100, 100, 100), (0,0), (1,1))
-    pygame.draw.line(texture_surface, (100, 100, 100), (0,1), (1,0))
-    texture_data = pygame.image.tostring(texture_surface, "RGBA", 1)
-    texid = glGenTextures(1)
-    glBindTexture(GL_TEXTURE_2D, texid)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture_data)
-    return texid
-
-texture_id = load_texture()
-
-# Função para desenhar um cubo com textura
-def draw_block(x, y, z, size=BLOCK_SIZE):
-    glBindTexture(GL_TEXTURE_2D, texture_id)
-    glBegin(GL_QUADS)
-    # Front face
-    glNormal3f(0, 0, 1)
-    glTexCoord2f(0, 0); glVertex3f(x - size/2, y - size/2, z + size/2)
-    glTexCoord2f(1, 0); glVertex3f(x + size/2, y - size/2, z + size/2)
-    glTexCoord2f(1, 1); glVertex3f(x + size/2, y + size/2, z + size/2)
-    glTexCoord2f(0, 1); glVertex3f(x - size/2, y + size/2, z + size/2)
-
-    # Back face
-    glNormal3f(0, 0, -1)
-    glTexCoord2f(0, 0); glVertex3f(x - size/2, y + size/2, z - size/2)
-    glTexCoord2f(1, 0); glVertex3f(x + size/2, y + size/2, z - size/2)
-    glTexCoord2f(1, 1); glVertex3f(x + size/2, y - size/2, z - size/2)
-    glTexCoord2f(0, 1); glVertex3f(x - size/2, y - size/2, z - size/2)
-
-    # Left face
-    glNormal3f(-1, 0, 0)
-    glTexCoord2f(0, 0); glVertex3f(x - size/2, y - size/2, z - size/2)
-    glTexCoord2f(1, 0); glVertex3f(x - size/2, y - size/2, z + size/2)
-    glTexCoord2f(1, 1); glVertex3f(x - size/2, y + size/2, z + size/2)
-    glTexCoord2f(0, 1); glVertex3f(x - size/2, y + size/2, z - size/2)
-
-    # Right face
-    glNormal3f(1, 0, 0)
-    glTexCoord2f(0, 0); glVertex3f(x + size/2, y - size/2, z + size/2)
-    glTexCoord2f(1, 0); glVertex3f(x + size/2, y - size/2, z - size/2)
-    glTexCoord2f(1, 1); glVertex3f(x + size/2, y + size/2, z - size/2)
-    glTexCoord2f(0, 1); glVertex3f(x + size/2, y + size/2, z + size/2)
-
-    # Top face
-    glNormal3f(0, 1, 0)
-    glTexCoord2f(0, 0); glVertex3f(x - size/2, y + size/2, z + size/2)
-    glTexCoord2f(1, 0); glVertex3f(x + size/2, y + size/2, z + size/2)
-    glTexCoord2f(1, 1); glVertex3f(x + size/2, y + size/2, z - size/2)
-    glTexCoord2f(0, 1); glVertex3f(x - size/2, y + size/2, z - size/2)
-
-    # Bottom face
-    glNormal3f(0, -1, 0)
-    glTexCoord2f(0, 0); glVertex3f(x - size/2, y - size/2, z - size/2)
-    glTexCoord2f(1, 0); glVertex3f(x + size/2, y - size/2, z - size/2)
-    glTexCoord2f(1, 1); glVertex3f(x + size/2, y - size/2, z + size/2)
-    glTexCoord2f(0, 1); glVertex3f(x - size/2, y - size/2, z + size/2)
-    glEnd()
+glEnable(GL_BLEND)
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+glPointSize(3)
 
 # Setup OpenCL
-platforms = cl.get_platforms()
-platform = platforms[0]  # Seleciona o primeiro (AMD)
+platform = cl.get_platforms()[0]
 device = platform.get_devices()[0]
 context = cl.Context([device])
 queue = cl.CommandQueue(context)
 
-# OpenCL kernel para explosão
-kernel_source = """
-__kernel void explode(
-    __global float4* pos,
-    __global float4* vel,
-    const float3 explosion_center,
-    const float explosion_radius,
-    const float explosion_power,
-    const float delta_time)
-{
-    int i = get_global_id(0);
-    float3 p = (float3)(pos[i].x, pos[i].y, pos[i].z);
-    float3 dir = p - explosion_center;
-    float dist = length(dir);
-    if (dist < explosion_radius && dist > 0.0f)
-    {
-        float effect = (explosion_radius - dist) / explosion_radius;
-        float3 force = normalize(dir) * effect * explosion_power;
-        vel[i].xyz += force * delta_time;
+# Kernel OpenCL para física
+kernel_code = """
+__kernel void simulate_rain(
+    __global float3* positions,
+    __global float3* velocities,
+    __global float4* colors,
+    __global float* lifetimes,
+    float dt,
+    int total_particles,
+    int impact_occurred
+) {
+    int gid = get_global_id(0);
+    if (gid >= total_particles) return;
+
+    const float gravity = -9.8f;
+    const float damping = 0.99f;
+
+    if (gid == 0 && impact_occurred == 0) {
+        // Gota caindo
+        velocities[gid].y += gravity * dt;
+        positions[gid] += velocities[gid] * dt;
+
+        if (positions[gid].y <= 0.0f) {
+            positions[gid].y = 0.0f;
+            // Impacto ocorreu (flag fora do kernel)
+        }
+    } else if (impact_occurred == 1 && gid > 0) {
+        if (lifetimes[gid] > 0.0f) {
+            velocities[gid].y += gravity * dt * 0.3f;
+            positions[gid] += velocities[gid] * dt;
+
+            velocities[gid] *= damping;
+
+            if (positions[gid].y < 0.0f) {
+                positions[gid].y = 0.0f;
+                velocities[gid].y = -velocities[gid].y * 0.4f;
+            }
+
+            lifetimes[gid] -= dt;
+
+            float alpha = lifetimes[gid] * 0.5f;
+            if (alpha < 0.0f) alpha = 0.0f;
+
+            colors[gid].w = alpha;
+
+            // Mudança sutil de cor na evaporação
+            colors[gid].x = 0.2f + (1.0f - alpha) * 0.3f;
+            colors[gid].z = 1.0f - (1.0f - alpha) * 0.5f;
+        }
     }
-    // Atualiza posição pela velocidade
-    pos[i].xyz += vel[i].xyz * delta_time;
 }
 """
 
-program = cl.Program(context, kernel_source).build()
+program = cl.Program(context, kernel_code).build()
 
-# Inicializa posições e velocidades dos blocos
-positions_np = np.zeros((NUM_PARTICLES, 4), dtype=np.float32)
-velocities_np = np.zeros((NUM_PARTICLES, 4), dtype=np.float32)
+# Buffers host
+positions = np.zeros((PARTICLES, 3), dtype=np.float32)
+velocities = np.zeros((PARTICLES, 3), dtype=np.float32)
+colors = np.zeros((PARTICLES, 4), dtype=np.float32)
+lifetimes = np.zeros(PARTICLES, dtype=np.float32)
 
-index = 0
-for x in range(NUM_BLOCKS):
-    for y in range(NUM_BLOCKS):
-        for z in range(NUM_BLOCKS):
-            positions_np[index] = (x * BLOCK_SIZE, y * BLOCK_SIZE, z * BLOCK_SIZE, 0)
-            velocities_np[index] = (0, 0, 0, 0)
-            index += 1
+# Inicializa gota principal
+positions[0] = [0.0, 10.0, 0.0]
+velocities[0] = [0.0, -1.0, 0.0]
+colors[0] = [0.2, 0.4, 1.0, 1.0]
+lifetimes[0] = SIM_DURATION
 
-mf = cl.mem_flags
-pos_buf = cl.Buffer(context, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=positions_np)
-vel_buf = cl.Buffer(context, mf.READ_WRITE | mf.COPY_HOST_PTR, hostbuf=velocities_np)
+# Cria buffers OpenCL
+cl_positions = cl.Buffer(context, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=positions)
+cl_velocities = cl.Buffer(context, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=velocities)
+cl_colors = cl.Buffer(context, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=colors)
+cl_lifetimes = cl.Buffer(context, cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR, hostbuf=lifetimes)
 
-clock = pygame.time.Clock()
+# Função para carregar textura
+def load_texture(path):
+    img = Image.open(path).convert("RGBA")
+    img_data = np.array(img)
+    tex = glGenTextures(1)
+    glBindTexture(GL_TEXTURE_2D, tex)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width, img.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img_data)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+    return tex
 
+try:
+    texture_id = load_texture("water_texture.png")  # Substitua pelo seu arquivo
+except Exception:
+    texture_id = None
+
+# Variáveis para controle
+impact_occurred = 0
 start_time = time.time()
-simulation_time = 30.0  # segundos de simulação
+camera_angle = 0.0
 
-running = True
-while running:
-    delta_time = clock.tick(60) / 1000.0
+# Função para inicializar partículas de respingo após impacto
+def init_splash_particles():
+    for i in range(1, PARTICLES):
+        angle = 2 * math.pi * (i % 360) / 360.0
+        speed = 2.0 + (i % 100) * 0.02
+        dir_x = math.cos(angle)
+        dir_y = abs(math.sin(angle))
+        dir_z = math.sin(angle)
 
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+        positions[i] = [0.0, 0.0, 0.0]
+        velocities[i] = [dir_x * speed, dir_y * speed * 2.0, dir_z * speed]
+        colors[i] = [0.2, 0.4, 1.0, 1.0]
+        lifetimes[i] = 2.0 + (i % 100) * 0.01
 
-    # Atualiza kernel
-    program.explode(queue, (NUM_PARTICLES,), None,
-                   pos_buf, vel_buf,
-                   cl.array.vec.make_float3(*EXPLOSION_ORIGIN),
-                   np.float32(EXPLOSION_RADIUS),
-                   np.float32(EXPLOSION_POWER),
-                   np.float32(delta_time))
+    # Atualiza buffers OpenCL
+    cl.enqueue_copy(queue, cl_positions, positions)
+    cl.enqueue_copy(queue, cl_velocities, velocities)
+    cl.enqueue_copy(queue, cl_colors, colors)
+    cl.enqueue_copy(queue, cl_lifetimes, lifetimes)
     queue.finish()
 
-    # Lê dados da GPU para CPU para renderização
-    cl.enqueue_copy(queue, positions_np, pos_buf)
-
-    # Renderiza
+# Renderização
+def render():
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-    glPushMatrix()
-    glRotatef(20, 1, 0, 0)
-    glRotatef(pygame.time.get_ticks() * 0.02, 0, 1, 0)
+    glLoadIdentity()
 
-    for i in range(NUM_PARTICLES):
-        pos = positions_np[i]
-        draw_block(pos[0], pos[1], pos[2])
+    # Posiciona câmera em círculo
+    cam_x = 15 * math.sin(camera_angle)
+    cam_z = 15 * math.cos(camera_angle)
+    gluLookAt(cam_x, 5.0, cam_z, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
 
-    glPopMatrix()
-    pygame.display.flip()
+    # Desenha chão
+    glColor4f(0.3, 0.3, 0.4, 1.0)
+    glBegin(GL_QUADS)
+    glVertex3f(-20.0, 0.0, -20.0)
+    glVertex3f(-20.0, 0.0,  20.0)
+    glVertex3f( 20.0, 0.0,  20.0)
+    glVertex3f( 20.0, 0.0, -20.0)
+    glEnd()
 
-    # Para simulação após 30 segundos
-    if time.time() - start_time > simulation_time:
-        running = False
+    # Partículas
+    if texture_id:
+        glEnable(GL_TEXTURE_2D)
+        glBindTexture(GL_TEXTURE_2D, texture_id)
+    else:
+        glDisable(GL_TEXTURE_2D)
 
-pygame.quit()
+    glBegin(GL_POINTS)
+    for i in range(PARTICLES):
+        if lifetimes[i] > 0.0:
+            glColor4fv(colors[i])
+            glVertex3fv(positions[i])
+    glEnd()
+
+    if texture_id:
+        glDisable(GL_TEXTURE_2D)
+
+# Loop principal
+while not glfw.window_should_close(window):
+    current_time = time.time() - start_time
+    dt = 0.016  # Aproximadamente 60 FPS
+
+    if current_time >= SIM_DURATION:
+        break
+
+    # Detecta impacto e inicializa respingo
+    if impact_occurred == 0 and positions[0][1] <= 0.0:
+        impact_occurred = 1
+        init_splash_particles()
+
+    # Atualiza física com OpenCL
+    program.simulate_rain(
+        queue, (PARTICLES,), None,
+        cl_positions, cl_velocities, cl_colors, cl_lifetimes,
+        np.float32(dt),
+        np.int32(PARTICLES),
+        np.int32(impact_occurred)
+    )
+
+    # Copia dados atualizados de volta para renderização
+    cl.enqueue_copy(queue, positions, cl_positions)
+    cl.enqueue_copy(queue, colors, cl_colors)
+    cl.enqueue_copy(queue, lifetimes, cl_lifetimes)
+
+    camera_angle += 0.002
+
+    render()
+
+    glfw.swap_buffers(window)
+    glfw.poll_events()
+
+glfw.terminate()
